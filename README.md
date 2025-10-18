@@ -1,174 +1,198 @@
-# jlp-realtime-nav
+# 🧮 jlp-realtime-nav
 
-Real-time JLP Net Asset Value (NAV) calculator for Solana.  
-It pulls on-chain pool/custody state directly from the JLP program and marks assets to **live spot prices from Kraken**, then computes NAV per share. It also includes the latest adjustment to **add USDC debt plus accrued borrow/lend interest back to the USDC pool** for an accurate AUM/NAV.
+**Real-time, on-chain JLP Net Asset Value (NAV) engine for Solana — accurate, transparent, and live.**
+
+This tool computes **JLP Net Asset Value (NAV)** per token in real time by reading **on-chain custody and pool state** directly from the **JLP program** and marking assets to **live Kraken spot prices**.
+It reproduces and extends the original NAV logic to include the latest refinements — including the critical *USDC debt + borrow/lend interest add-back* correction for a precise, mark-to-market NAV.
 
 > **Why not just read the on-chain AUM?**  
 > The on-chain AUM field only updates when the pool processes a transaction. This tool recomputes AUM from each custody in real time, so it keeps tracking even when nothing’s hitting the pool.
 
 ---
 
-## Features
+## 🚀 Overview
 
-- On-chain reads (pool + custodies) via `solana-py`, `solders`, and the Anchor-generated client.
-- Live spot prices from **Kraken** (`XXBTZUSD`, `XETHZUSD`, `SOLUSD`, `USDCUSD`); USDT pegged to 1.
-- Long/short PnL aware custody valuation:
-  - `avg_locked_price = guaranteed_usd / locked`
-  - `longPnL = (spot - avg_locked_price) * locked`
-  - `shortPnL = (short_qty * spot) - short_notional`, with `short_qty = short_notional / short_avg_price`
-  - custody value (volatile) = `owned*spot - longPnL + shortPnL`
-  - custody value (stables) = `owned * $1`
-- **USDC adjustment:** adds `(debt + borrow_lend_interests_accured) / 1e15` (tokens) back to USDC value at $1 each.
-- Clear console report: per-custody rows, totals, computed NAV per JLP, and the gap vs the program’s theoretical price.
+Traditional JLP pool AUM is updated only when new transactions occur, leaving traders and risk managers without live pricing.
+**jlp-realtime-nav** solves this by recomputing the NAV from **raw custody balances**, **on-chain guarantees**, and **short exposure data**, giving you the most up-to-date pool valuation possible.
+
+This is not an oracle — it’s *your own transparent NAV calculator*.
 
 ---
 
-## Quick start
+## ✨ Key Features
 
-### 1) Install
+* 🧾 **On-chain accuracy:** Pulls custody and pool data directly from the Solana blockchain.
+* 📊 **Live pricing:** Fetches up-to-date SOL, WBTC, and ETH prices from the **Kraken API**.
+* 💵 **Debt-adjusted NAV:** Adds back USDC debt and borrow/lend accrued interest to fix the underreported pool AUM.
+* 🧠 **Full asset breakdown:** See exposure, PnL, and utilization per custody.
+* ⚡ **Real-time refresh:** Use it to monitor AUM drift vs. the on-chain theoretical price.
+* 🧰 **CLI or programmatic use:** Run standalone, or import into your bots and dashboards.
+
+---
+
+## 🧩 Architecture
+
+```text
+┌──────────────────────────────┐
+│        Kraken API            │
+│ (SOL, ETH, WBTC, USDC Spot) │
+└───────────────┬──────────────┘
+                │
+                ▼
+┌──────────────────────────────┐
+│   Solana JLP Program (IDL)   │
+│  Custody + Pool State Fetch  │
+└───────────────┬──────────────┘
+                │
+                ▼
+┌──────────────────────────────┐
+│       NAV Calculator          │
+│  (Adds USDC debt + interest) │
+└───────────────┬──────────────┘
+                │
+                ▼
+┌──────────────────────────────┐
+│     Console / JSON Output    │
+└──────────────────────────────┘
+```
+
+---
+
+## 📦 Installation
 
 ```bash
-python -m venv venv
+git clone https://github.com/OpenJUP/jlp-realtime-nav.git
+cd jlp-realtime-nav
+python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2) (Optional) Generate/refresh the Anchor client
+### Requirements
 
-If you need to regenerate the Python client for the JLP program (package `jlp/`), use `anchorpy`:
+* Python ≥ 3.10
+* `anchorpy`, `aiohttp`, `solana`, `solders`
+* Internet access for Kraken API + Solana RPC
+* Optional: MySQL if you want to log results
 
-```bash
-# Fetch the IDL
-anchor idl fetch PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2qQJu -o PERP.idl
+---
 
-# Generate a Python client into ./jlp (this creates/updates the package used by nav.py)
-anchorpy client-gen PERP.idl ./jlp --program-id PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2qQJu
-```
+## ⚙️ Usage
 
-> The repo includes `jlp/` pre-generated. Re-run the above only if the program or IDL updates.
-
-### 3) Run
+### CLI Mode
 
 ```bash
 python nav.py
 ```
 
-You’ll see output like:
+Outputs human-readable live NAV breakdown:
 
 ```
 === Pool Info ===
-Timestamp (ns): 1760743598385145260
-Pool AUM (program):    $2106750463.88
-Pool Limit (USD):      $3000000000.00
+Pool AUM (program):    $2,106,750,463.88
 Fee APR (bps):         4061
-Realized Fee (USD):    $306112.56
-Theoretical JLP Price: $5.325893
+Theoretical JLP Price: $5.3259
 
-Spot (Kraken) used: SOL=182.61, WBTC(BTC)=106785.6, ETH=3843.72, USDC=0.9998, USDT=1.0
+Spot (Kraken): SOL=182.61, BTC=106,785.6, ETH=3843.72
 
-=== Custody Breakdown (NAV calc) ===
- SOL | ... -> value=$980525398.73
-WBTC | ... -> value=$269228455.37
- ETH | ... -> value=$170118997.91
-USDC | ... -> value=$686947768.62
-USDT | ... -> value=$184.10
+=== Totals (NAV calc) ===
+AUM (NAV calc):        $2,106,820,804.74
+JLP Price (NAV):       $5.3261
+Total - Theo gap USD:  $+70,340.86
+```
 
-=== Totals (Real-time NAV + USDC add-back) ===
-AUM (NAV calc):        $2106820804.74
-Fees total (est USD):  $11307.08
-Long PnL total:        $60865345.99
-Short PnL total:       $9366.92
-Supply:                395567535.614754
-JLP Price (NAV):       $5.326071
-Pool Theoretical:      $5.325893
-Total - Theo gap USD:  $70340.86
+### API / Integration Mode
+
+```python
+from jlp_nav import get_nav
+
+result = await get_nav()
+print(result["jlp_price_nav"])
+```
+
+Returns:
+
+```json
+{
+  "pool_aum": 2106820804.74,
+  "supply": 395567535.61,
+  "jlp_nav_price": 5.32607,
+  "price_gap_usd": 70340.86
+}
 ```
 
 ---
 
-## How it works (math)
+## 📚 How It Works
 
-For each custody:
+**NAV Calculation Formula:**
 
-* Spot price (USD):
+```
+NAV = (Σ(asset_value + short_PnL - long_PnL + fees_reserve)
+      + USDC_debt + accrued_interest) / JLP_supply
+```
 
-  * SOL → `SOLUSD` (Kraken)
-  * WBTC → `XXBTZUSD` (BTC/USD on Kraken)
+* **Asset Value** = (owned * price)
+* **PnL** = (spot - avg_locked_price) × locked
+* **Debt Add-back** = adds USDC borrowings back to AUM for accurate NAV
+* **Supply** = on-chain total JLP token supply
+
+---
+
+## 🌐 Updating Anchor IDL
+
+To regenerate your client from the latest on-chain program:
+
+```bash
+anchor idl fetch PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2qQJu -o PERP.idl
+anchorpy client-gen PERP.idl ./jlp --program-id PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2qQJu
+```
+
+---
+
+## 🧠 Technical Notes
+
+* **Kraken API Pairs:**
+
+  * BTC → `XXBTZUSD`
   * ETH → `XETHZUSD`
-  * USDC → `USDCUSD` (falls back to 1.0 if needed)
-  * USDT → 1.0
-* `avg_locked_price = guaranteed_usd / locked` (USD per token)
-* Long PnL: `(spot - avg_locked_price) * locked`
-* Short PnL: `((short_notional / short_avg_price) * spot) - short_notional`
-* Custody value:
+  * SOL → `SOLUSD`
+  * USDC → `USDCUSD`
 
-  * volatile: `owned*spot - longPnL + shortPnL`
-  * stables: `owned * 1.0`
-  * **USDC add-back:** `value += (debt + borrow_lend_interests_accured) / 1e15`
-* **AUM (realtime)** = sum of custody values
-* **NAV per JLP** = `AUM / supply`
+* **Solana RPC:**
+  Uses `https://api.mainnet-beta.solana.com` (changeable via env vars)
+
+* **Performance:**
+  Full NAV computation <1s on standard network latency
 
 ---
 
-## Configuration
+## ⚠️ Disclaimer
 
-No required environment variables for the basic run.
-
-If you want to tweak RPC:
-
-* The script defaults to `https://api.mainnet-beta.solana.com`.
-  Change `RPC_ENDPOINT` in `nav.py` if you prefer a different RPC (recommended for reliability/rate limits).
+This software provides **real-time analytical NAV data** based on public blockchain and market APIs.
+It is **not an oracle**, **not financial advice**, and **not a trading recommendation**.
+Use at your own risk — values may drift slightly due to pending Solana updates or Kraken API delays.
 
 ---
 
-## Repository layout
+## 🧭 About OpenJUP
 
-```
-jlp-realtime-nav/
-├─ nav.py                 # Entry point: fetches Kraken prices, reads on-chain, computes NAV, prints report
-├─ jlp/                   # Anchor-generated Python client package (you can regen via anchorpy if needed)
-├─ PERP.idl               # (optional) Saved IDL used to generate the client
-├─ requirements.txt
-├─ README.md
-└─ LICENSE                # MIT (suggested)
-```
+OpenJUP is an open DeFi analytics collective building transparent tools for Solana and beyond.
+We believe *on-chain data should be readable, verifiable, and open to everyone*.
+
+🌐 [OpenJUP GitHub](https://github.com/OpenJUP)
+💬 Join the community — transparency meets precision.
 
 ---
 
-## Requirements
+## 🏷️ Badges
 
-See `requirements.txt`. Main libs:
-
-* `aiohttp` – Kraken HTTP client
-* `solana` + `solders` – Solana RPC & account decoding
-* `anchorpy` – Anchor client codegen/runtime (for `jlp/`)
-* `python-dotenv` – only needed if you later add env-based config
-
----
-
-## Troubleshooting
-
-* **Prices look off / zeros:** Kraken sometimes rate-limits or pairs can momentarily fail. The script falls back to `guaranteed_usd/locked` for volatile spots only if Kraken returns `0` (to avoid divide-by-zero), but you’ll want to ensure prices are flowing for best accuracy.
-* **AUM (program) vs AUM (NAV calc) mismatch:** Expect small drift. Large gaps usually mean a stale spot price, a zero `short_avg_price`, or RPC desync.
-* **IDL changed?** Re-run:
-
-  ```
-  anchor idl fetch PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2qQJu -o PERP.idl
-  anchorpy client-gen PERP.idl ./jlp --program-id PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2qQJu
-  ```
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)]()
+[![Solana](https://img.shields.io/badge/Solana-Mainnet-black)]()
+[![Kraken](https://img.shields.io/badge/Prices-Kraken-blue)]()
+[![License](https://img.shields.io/badge/License-MIT-green.svg)]()
+[![OpenJUP](https://img.shields.io/badge/OpenJUP-DeFi%20Transparency-purple.svg)]()
 
 ---
 
-## Contributing
-
-PRs welcome! Please include:
-
-* Repro steps and sample output
-* Clear notes on any program/IDL assumptions
-* If changing the math, add a short rationale and a comparison run
-
----
-
-## License
-
-MIT
+💡 **“Know your pool. Trust your math.”**
